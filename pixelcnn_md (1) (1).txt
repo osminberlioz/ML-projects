@@ -1,0 +1,268 @@
+
+
+👾 PixelCNN using Tensorflow distributions
+
+In this notebook, we'll walk through the steps required to train your
+own PixelCNN on the fashion MNIST dataset using Tensorflow distributions
+
+    %load_ext autoreload
+    %autoreload 2
+    import numpy as np
+
+    import tensorflow as tf
+    from tensorflow.keras import datasets, layers, models, optimizers, callbacks
+    import tensorflow_probability as tfp
+    import matplotlib.pyplot as plt
+
+
+    def sample_batch(dataset):
+        batch = dataset.take(1).get_single_element()
+        if isinstance(batch, tuple):
+            batch = batch[0]
+        return batch.numpy()
+
+
+    def display(
+        images, n=10, size=(20, 3), cmap="gray_r", as_type="float32", save_to=None
+    ):
+        """
+        Displays n random images from each one of the supplied arrays.
+        """
+        if images.max() > 1.0:
+            images = images / 255.0
+        elif images.min() < 0.0:
+            images = (images + 1.0) / 2.0
+
+        plt.figure(figsize=size)
+        for i in range(n):
+            _ = plt.subplot(1, n, i + 1)
+            plt.imshow(images[i].astype(as_type), cmap=cmap)
+            plt.axis("off")
+
+        if save_to:
+            plt.savefig(save_to)
+            print(f"\nSaved to {save_to}")
+
+        plt.show()
+
+    The autoreload extension is already loaded. To reload it, use:
+      %reload_ext autoreload
+
+0. Parameters 
+
+    IMAGE_SIZE = 32
+    N_COMPONENTS = 5
+    EPOCHS = 10
+    BATCH_SIZE = 128
+
+1. Prepare the data 
+
+    # Load the data
+    (x_train, _), (_, _) = datasets.fashion_mnist.load_data()
+
+    Downloading data from https://storage.googleapis.com/tensorflow/tf-keras-datasets/train-labels-idx1-ubyte.gz
+    29515/29515 [==============================] - 0s 0us/step
+    Downloading data from https://storage.googleapis.com/tensorflow/tf-keras-datasets/train-images-idx3-ubyte.gz
+    26421880/26421880 [==============================] - 2s 0us/step
+    Downloading data from https://storage.googleapis.com/tensorflow/tf-keras-datasets/t10k-labels-idx1-ubyte.gz
+    5148/5148 [==============================] - 0s 0us/step
+    Downloading data from https://storage.googleapis.com/tensorflow/tf-keras-datasets/t10k-images-idx3-ubyte.gz
+    4422102/4422102 [==============================] - 1s 0us/step
+
+    # Preprocess the data
+
+
+    def preprocess(imgs):
+        imgs = np.expand_dims(imgs, -1)
+        imgs = tf.image.resize(imgs, (IMAGE_SIZE, IMAGE_SIZE)).numpy()
+        return imgs
+
+
+    input_data = preprocess(x_train)
+
+    # Show some items of clothing from the training set
+    display(input_data)
+
+[]
+
+2. Build the PixelCNN 
+
+    # Define a Pixel CNN network
+    dist = tfp.distributions.PixelCNN(
+        image_shape=(IMAGE_SIZE, IMAGE_SIZE, 1),
+        num_resnet=1,
+        num_hierarchies=2,
+        num_filters=32,
+        num_logistic_mix=N_COMPONENTS,
+        dropout_p=0.3,
+    )
+
+    # Define the model input
+    image_input = layers.Input(shape=(IMAGE_SIZE, IMAGE_SIZE, 1))
+
+    # Define the log likelihood for the loss fn
+    log_prob = dist.log_prob(image_input)
+
+    # Define the model
+    pixelcnn = models.Model(inputs=image_input, outputs=log_prob)
+    pixelcnn.add_loss(-tf.reduce_mean(log_prob))
+
+3. Train the PixelCNN 
+
+    # Compile and train the model
+    pixelcnn.compile(
+        optimizer=optimizers.Adam(0.001),
+    )
+
+    import os
+
+    # Define the directory path
+    output_dir = "./output"
+
+    # Check if the directory exists
+    if not os.path.exists(output_dir):
+        # Create the directory if it does not exist
+        os.makedirs(output_dir)
+
+    tensorboard_callback = callbacks.TensorBoard(log_dir="./logs")
+
+
+    class ImageGenerator(callbacks.Callback):
+        def __init__(self, num_img):
+            self.num_img = num_img
+
+        def generate(self):
+            return dist.sample(self.num_img).numpy()
+
+        def on_epoch_end(self, epoch, logs=None):
+            generated_images = self.generate()
+            display(
+                generated_images,
+                n=self.num_img,
+                save_to="./output/generated_img_%03d.png" % (epoch),
+            )
+
+
+    img_generator_callback = ImageGenerator(num_img=2)
+
+    pixelcnn.fit(
+        input_data,
+        batch_size=BATCH_SIZE,
+        epochs=EPOCHS,
+        verbose=True,
+        callbacks=[tensorboard_callback, img_generator_callback],
+    )
+
+    WARNING:tensorflow:Model failed to serialize as JSON. Ignoring... 
+    Layer _PixelCNNNetwork was created by passing
+    non-serializable argument values in `__init__()`,
+    and therefore the layer must override `get_config()` in
+    order to be serializable. Please implement `get_config()`.
+
+    Example:
+
+    class CustomLayer(keras.layers.Layer):
+        def __init__(self, arg1, arg2, **kwargs):
+            super().__init__(**kwargs)
+            self.arg1 = arg1
+            self.arg2 = arg2
+
+        def get_config(self):
+            config = super().get_config()
+            config.update({
+                "arg1": self.arg1,
+                "arg2": self.arg2,
+            })
+            return config
+
+    Epoch 1/10
+    469/469 [==============================] - ETA: 0s - loss: 2363.4370
+    Saved to ./output/generated_img_000.png
+
+[]
+
+    469/469 [==============================] - 239s 447ms/step - loss: 2363.4370
+    Epoch 2/10
+    469/469 [==============================] - ETA: 0s - loss: 2074.6855
+    Saved to ./output/generated_img_001.png
+
+[]
+
+    469/469 [==============================] - 207s 441ms/step - loss: 2074.6855
+    Epoch 3/10
+    469/469 [==============================] - ETA: 0s - loss: 1991.2271
+    Saved to ./output/generated_img_002.png
+
+[]
+
+    469/469 [==============================] - 207s 442ms/step - loss: 1991.2271
+    Epoch 4/10
+    469/469 [==============================] - ETA: 0s - loss: 1938.1406
+    Saved to ./output/generated_img_003.png
+
+[]
+
+    469/469 [==============================] - 208s 444ms/step - loss: 1938.1406
+    Epoch 5/10
+    469/469 [==============================] - ETA: 0s - loss: 1897.8068
+    Saved to ./output/generated_img_004.png
+
+[]
+
+    469/469 [==============================] - 207s 443ms/step - loss: 1897.8068
+    Epoch 6/10
+    469/469 [==============================] - ETA: 0s - loss: 1868.7745
+    Saved to ./output/generated_img_005.png
+
+[]
+
+    469/469 [==============================] - 207s 442ms/step - loss: 1868.7745
+    Epoch 7/10
+    469/469 [==============================] - ETA: 0s - loss: 1843.5945
+    Saved to ./output/generated_img_006.png
+
+[]
+
+    469/469 [==============================] - 207s 442ms/step - loss: 1843.5945
+    Epoch 8/10
+    469/469 [==============================] - ETA: 0s - loss: 1823.9767
+    Saved to ./output/generated_img_007.png
+
+[]
+
+    469/469 [==============================] - 207s 442ms/step - loss: 1823.9767
+    Epoch 9/10
+    469/469 [==============================] - ETA: 0s - loss: 1805.7076
+    Saved to ./output/generated_img_008.png
+
+[]
+
+    469/469 [==============================] - 208s 444ms/step - loss: 1805.7076
+    Epoch 10/10
+    469/469 [==============================] - ETA: 0s - loss: 1792.8380
+    Saved to ./output/generated_img_009.png
+
+[]
+
+    469/469 [==============================] - 209s 447ms/step - loss: 1792.8380
+
+    <keras.src.callbacks.History at 0x7f257567de70>
+
+4. Generate images 
+
+    generated_images = img_generator_callback.generate()
+
+    display(generated_images, n=img_generator_callback.num_img)
+
+[]
+
+    import matplotlib.pyplot as plt
+
+    # Assuming dist is your trained PixelCNN distribution
+    num_samples = 10  # Number of images to generate
+    generated_images = dist.sample(num_samples).numpy()  # Sample images
+
+    # Display the generated images
+    display(generated_images, n=num_samples)
+
+[]
